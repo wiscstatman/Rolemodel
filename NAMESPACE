@@ -1,0 +1,21 @@
+useDynLib(Rolemodel)
+
+## export functions ##
+export(ILP)
+export(optimalRM)
+export(shrinkRM)
+export(sequentialRM)
+export(Rolemodel)
+export(subRM)
+export(bp)
+export(I2edge)
+export(gs2edge)
+export(bpTable)
+export(estP)
+export(rmTable)
+export(rmPlot)
+
+## import functions ##
+importFrom(mgsa, mgsa)
+importFrom(Rglpk, Rglpk_solve_LP)
+importFrom(AnnotationDbi, toTable, revmap, mappedLkeys, as.list)

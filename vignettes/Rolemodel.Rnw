@@ -1,0 +1,232 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Zhishi Wang
+% Aimee Teo Broman
+% Introduction to Rolemodel library
+%
+% This is an "Sweave" document
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\VignetteEngine(knitr::knitr)
+%\VignetteIndexEntry{Introduction to Rolemodel}
+%\VignetteDepends{Rglpk, mgsa, org.Hs.eg.db, AnnotationDbi}
+\documentclass[12pt]{article}
+\usepackage{fullpage}
+\marginparwidth 0pt
+\oddsidemargin 0pt
+\evensidemargin 0pt
+\topmargin 0pt
+\textwidth 6.5in
+\textheight 8.5in
+\usepackage{fancyhdr}
+\usepackage{amsmath}
+\usepackage{color}
+\usepackage{sectsty}
+\raggedbottom
+
+% revise margins
+\setlength{\headheight}{0.0in}
+\setlength{\topmargin}{-0.25in}
+\setlength{\headsep}{0.0in}
+\setlength{\textheight}{9.00in}
+\setlength{\footskip}{0.5in}
+\setlength{\oddsidemargin}{0in}
+\setlength{\evensidemargin}{0in}
+\setlength{\textwidth}{6.5in}
+
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+
+\sectionfont{\large}
+
+\newcommand{\code}{\texttt}
+
+\title{An Introduction to the R package \code{Rolemodel}}
+
+\author{{\small Zhishi Wang, Aimee Teo Broman, Subhrangshu Nandi,
+Bret Larget, Karl Broman and Michael Newton}}
+\date{}
+
+\begin{document}
+
+\SweaveOpts{prefix.string=Rolemodel,keep.source=TRUE}
+\setkeys{Gin}{width=\textwidth} %% <- change width of figures
+% Try to get the R code from running into the margin
+<<echo=FALSE>>=
+ options(width=77, continue="  ")
+ pdf.options(pointsize=8)
+@ 
+
+\maketitle
+
+\tableofcontents
+
+\section{Introduction}
+The \code{Rolemodel} package is intended to implement the model-based gene-set enrichment analysis method described in Wang {\em et al.} (2015). We call our method multi-functional analyzer, or MFA for short. Our method is based on the role model, first proposed by Bauer {\em et al.} (2010). In the role model, we have a finite number of wholes and parts; each whole is a set of parts. In the gene set analysis problem, gene sets can be treated as wholes and genes as parts; each gene set is a set of unordered genes. Two computational advances are developed to do the posterior inference: one is the integer linear programming (MFA-ILP), from which we can obtain the MAP (maximum a posteriori) estimate of active gene sets; the other is the penalized MCMC (MFA-MCMC), from which we can obtain the posterior active probability for each gene set. We would like to use MFA-ILP as our primary tool, as it gives a summary functional decoding of the gene list, while posterior probabilities from the MCMC computation provide a measure of confidence in the inferred sets.
+
+In this articel, we describe how to use the functions in the \code{Rolemodel}
+package. The function \code{sequentialRM} performs the MFA-ILP computation, and the function \code{bp} performs the MFA-MCMC.
+Generally, the input for MFA include a list of experimentally derived genes ({\em e.g.,} differentially expressed genes under different cell type conditions), the 0-1 incidence matrix characterizing the inclusion relationship between wholes and parts, the system parameters $\alpha$ (the false positive rate), $\gamma$ (the true positive rate) and $p$ (the prior active probability for whole nodes), where $\alpha$, $\gamma$ and $p$ are all numeric values between 0 and 1, and $\alpha$ is supposed to be less than $\gamma$. We can estimate the values of $\alpha$ and $\gamma$ from the gene-level data (see details in Wang {\em et al.}, 2015), and then estimate the value of $p$ via the R package \code{mgsa}. In this article, let's assume that $\alpha$, $\gamma$ and $p$ are known parameters. 
+
+\section{Setup}
+
+Say we have a list of human genes, and we are interested in their 
+gene-set enrichment. For this example, I will sample a random set of 
+100 genes from the \code{org.Hs.eg.db} database.
+
+<<genesamp>>=
+library(org.Hs.eg.db)
+
+genes <- sample(mappedRkeys(org.Hs.egSYMBOL),100)
+head(genes)
+@ 
+
+Load the \code{Rolemodel} library.
+<<<loadlib>>=
+library(Rolemodel)
+@ 
+
+The \code{gs2edge} function will take this vector of genes, and create input 
+objects for the \code{ILP} or \code{sequentialRM}, and \code{bp} functions.
+Gene-set enrichment is based on Entrez-ID gene IDs; if the gene list is 
+composed of gene symbols, these will be converted to Entrez ID. \code{n.upp} 
+and \code{n.low} are the maximum and minimum gene-set sizes to
+consider in the enrichment analysis.  We recommend an \code{n.upp} <= 50 for 
+\code{ILP} and \code{sequentialRM} due to computing time and memory allocation.
+
+<<gs2edge>>=
+gs <- gs2edge(genes, n.upp=30, idtype="SYMBOL", lib="org.Hs.eg")
+
+I <- gs$I
+I[1:6,1:6]
+
+y <- gs$y
+head(y)
+
+edge <- gs$edge
+head(edge)
+@ 
+
+\section{Gene-set Enrichment}
+
+We will demonstrate the use of the \code{ILP}, \code{sequentialRM}, and 
+\code{bp} using the \code{t2d} dataset, which is included in the 
+\code{Rolemodel} library. To speed processing time, we consider gene-sets with 5 to 20 genes. 
+Use the \code{subRM} function to subset the \code{I} matrix.
+
+<<t2d>>=
+data(t2d)
+dim(t2d$I)
+sum(t2d$y)
+newI <- subRM(t2d$I, 5, 20)
+newy <- t2d$y[rownames(newI)]
+dim(newI)
+sum(newy)
+@ 
+
+
+As mentioned before, we need to specify the values of $\alpha$, $\gamma$ and $p$ before running MFA.
+The \code{p} parameter can be estimated using the \code{mgsa} library, via the
+\code{estP} function.  In this example, we are already given \code{p=0.00331}.
+As an exercise, however, we estimate p:
+
+<<params>>=
+alpha <- 0.00019
+gamma <- 0.02279
+pest <- estP(I=newI, y=newy, alpha, gamma)
+pest
+@
+
+An internal study indicates that the algorithm is not overly sensitive to the exact settings of these parameters, but to their range.
+
+\subsection{MFA-ILP: MAP estimate via integer linear programming}
+We use the R package \code{Rglpk} to do the integer linear programming, which is an R interface to GNU Linear Programming Kit intending to solve large-scale linear programming problems. The function \code{ILP} in our package is a wrapper designed for the specific gene-set problem by invoking the function \code{Rglpk\_solve\_LP} in \code{Rglpk} directly.
+
+<<ILP>>=
+ alpha <- 0.00019
+ gamma <- 0.02279
+ p <- 0.00331
+# do not run
+# res <- ILP(newI, newy, alpha, gamma, p)
+@
+
+It is very time-consuming to run \code{ILP} directly when the dimension of the incidence matrix is kind of large. So one suggestion is that using the function \code{sequentialRM} rather than \code{ILP} to do the ILP related computation. \code{SequentialRM} is a wrapper to implement the two approaches (shrinkage and sequential strategy) developed in Wang {\em et al.} (2013) to speed up the computation.
+
+<<sequentialRM>>=
+res <- sequentialRM(newI, newy, nupstart=10, by=1, alpha, gamma, p)
+str(res)
+@
+
+Here \code{nupstart} indicates the starting upper bound of the number of genes in a set, which is used to subset the incidence matrix, and  \code{by} indicates the increment of the upper bound for each iteration in the sequential strategy. One suggestion is to set \code{nupstart} $\le$ 10, and \code{by} = 1. The output \code{res} is a list consisting of two parts. The first part \code{onwholes} includes the names of identified active GO terms (gene sets), {\em i.e.,} the MAP estimate. In this example, there are totally 8 GO terms identified as active. The second part \code{sol} is extracted directly from the output of function \code{Rglpk\_solve\_LP} in the package \code{Rglpk}, where 	\code{optimum} is the value of the objective function at the optimum, \code{solution} is the vector of optimal coefficients (0-1vector), and \code{status} is an integer with status information about the solution returned. It will return 0 for the optimal solution being found, and non-zero otherwise. Actually, the MAP estimate is just the whole nodes whose values are taking 1 in the optimal solution.
+
+<<sequentialRM>>=
+names(res$sol$solution)[res$sol$solution == 1][1:8]
+@
+
+	
+\subsection{MFA-MCMC: the posterior active probability}
+The function \code{bp} is used to do the MCMC sampling. The input for \code{bp} is a bit different from that in \code{sequentialRM} and is listed as follows:
+\begin{itemize}
+\item\code{whole} {Vector of character strings with names of whole nodes}
+\item\code{part} {Vector of 0's and 1's indicating active part nodes; names are the names of the part nodes}
+\item\code{edge} {Matrix with two columns; each row indicates an edge between a whole node and a part node}
+\item\code{alpha, gamma, p} {the same as before}
+\item\code{nburn} {Number of burn-in generations}
+\item\code{ngen} {Number of sample generations}
+\item\code{sub} {Subsample rate for burn-in and sample files}
+\item\code{penalty} {Penalty per illegal node to loglikelihood}
+\item\code{initial} {Initial states of whole nodes, which can take one of three values: \code{inactive} - all whole nodes inactive; \code{random} - all
+whole nodes active with probability \code{p}, no illegal nodes; or
+\code{high} - all nodes with proportion of connected part nodes
+with response equal to 1 above 0.4 are active, no illegal nodes.}
+\end{itemize}
+
+<<bp>>=
+eout <- I2edge(newI)
+ bp.out <- bp(whole=colnames(newI), part=newy, edge=eout, alpha, gamma, p, 
+nburn=1000000, ngen=10000000, sub=1000, penalty=5, initial="random")
+ str(bp.out)
+@
+
+Among the output of \code{bp} (see the help file for a full explanation), we are most interest in the \code{ActiveProbability}, which is the posterior active probability for each whole node. Generally, cut-off value 0.5 is used to pick GO terms as active.
+
+<<bp>>=
+bp.out$Name[bp.out$ActiveProbability>0.5]
+@
+
+As a result, these GO terms can be seen as the active ones inferred from the MCMC sampling. 
+\subsection{An integrative analysis function: summary of the result}
+As mentioned before, we would like to use MFA-ILP as our primary tool, while posterior probabilities from the MCMC computation provide a measure of confidence in the inferred sets. Of course, one can use the MCMC sampling result independently.\\
+We would like to report the MAP estimate in the decreasing order of the posterior active probabilities.
+
+<<summarize the result>>=
+tmp <- bp.out$ActiveProbability[bp.out$Name%in%res$onwholes]
+ord <- order(tmp, decreasing = T)
+output<- data.frame(MAP = res$onwholes[ord], P.MFA = tmp[ord])
+print(output)
+@
+
+On the other hand, we have also created an overall function \code{rmTable} to do both MFA-ILP and MFA-MCMC analysis simultaneously. Thus users can take total control of the parameters and interpret the result in an easier way. The input here is just a list of genes of interest, e.g., which can be a list of differentially expressed genes according to some different cellular conditions. The type of this gene list can be in Entrez ids, gene symbols, Ensembles, etc. The output includes four parts: the first part is a summary data frame about the active gene sets, including their GO terms, set size, number of associated genes included, and so on; the second part is the solution of ILP calculation (the same as the output of \code{sequentialRM}); the third part is the solution of MCMC calculation (the same as the output of \code{bp}); and the last part is the incidence matrix and the response vector based on the input gene list. Notice that since the up-to-date data source is used here, the result is slightly different from the one obtained previously.
+
+<<do ILP and MCMC analysis simultaneously>>= 
+data(T2D_genelist)
+idlist <- idlist[-57] ## no Entrez id for "KLHDC5"
+res <- rmTable (idlist, lib="org.Hs.eg", n.upp=20, n.low=5, nupstart=10, by=1, alpha=0.00019, gamma=0.02279, p=0.00331)
+str(res)
+@
+\subsection{A plot function}
+In order to visualize the active gene sets, we make a plot function \code{rmPlot} to display an image about the enriched gene sets and the associated genes contained by them. At the top row of the plot, it's the gene set having the highest overlap with the input gene list; then this gene set and genes in this set are removed from the system. The second row will plot the gene set having the highest overlap with the remainder, and so on.
+
+\begin{figure}\begin{center}<<label=fig1,fig=TRUE,echo=TRUE>>=rmPlot(res[[4]]$I, res[[4]]$y, res[[2]]$onwholes)@\end{center}\caption{Display the active gene sets. Top row is the gene set having the highest overlap with the input gene list; then this gene set and genes in this set are removed from the system. The second row is the gene set having the highest overlap with the remainder, and so on.}\end{figure}
+\section{Discussion}
+The R package \code{Rolemodel} mainly implements two computational approaches in the gene-set analysis problem: MFA-ILP and MFA-MCMC. When the system in consideration is large, MFA-ILP usually has a long running time and a high requirement on the memory size, due to the complexity of integer linear programming. We intend to develop an approximate algorithm to compute a local maximum of the likelihood of role model. The local maximum should be close to the real MAP estimate, while the computation time will be much faster. At that time, a new wrapper will be added to the package to implement the approximate algorithm. On the other hand, the estimation of parameters $\alpha$, $\gamma$ and $p$ can be a potential problem. We have developed some pipelines to estimate the values of $\alpha$ and $\gamma$; to develop an approach to estimate $p$ without the help of MGSA can contribute to make MFA as a standalone gene-set enrichment method.
+
+
+\textbf{Reference} \\
+Bauer, S., Gagneur, J. and Robinson, P. N. (2010). GOing Bayesian: model-based gene set analysis of genome-scale data. {\em Nucleic Acids Research}, 38 (11): 3523-3532.\\
+Wang, Z., He, Q., Larget, B. and Newton, M. (2015). A multi-functional analyzer uses parameter constaints to improve the efficiency of model-based gene-set analysis.\\
+Andrew P. M. and others: Large-scale association analysis provides insights into the genetic architecture and pathophysiology of type 2 diabetes (2012). Nature Genetics, Volume 44-9.\\
+
+\end{document}
+
+
+
+
