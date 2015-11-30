@@ -14,9 +14,9 @@ interesting genes **in the context of other possible explanations for these gene
 
 # Installation Instructions
 
-library(devtools) 
+`library(devtools)` 
 
-install_github("wiscstatman/Rolemodel")
+`install_github("wiscstatman/Rolemodel")`
 
 # Further background
 
